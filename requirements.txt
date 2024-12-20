@@ -1,5 +1,8 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
 python-dotenv
+pydub
 fish-audio-sdk
+email-validator
+aiofiles
