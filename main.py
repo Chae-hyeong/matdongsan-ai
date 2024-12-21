@@ -38,6 +38,7 @@ class TTSRequestData(BaseModel):
     file_name: str
     language: str
     text: str
+    folder: str
 
 def get_model_id(language: str) -> str:
     """언어 코드에 따라 모델 ID 반환"""
@@ -75,16 +76,16 @@ async def process_line_tts(index: int, line: str, model_id: str) -> dict:
 
     return {"index": index, "start": duration, "temp_file": temp_file}
 
-async def generate_tts_and_timeline(file_name: str, model_id: str, text: str):
+async def generate_tts_and_timeline(folder: str, file_name: str, model_id: str, text: str):
     """TTS 생성 및 타임라인 반환 (비동기, 4개씩 처리)"""
     sentences = split_into_sentences(text)
     combined_audio = AudioSegment.silent(duration=0)
     timeline = []
     temp_files = []
 
-    # tts 디렉토리 생성 (없으면 생성)
-    if not os.path.exists("tts"):
-        os.makedirs("tts")
+    # 요청한 폴더 생성 (없으면 생성)
+    if not os.path.exists(folder):
+        os.makedirs(folder)
 
     # 동시 작업 제한 설정 (한 번에 최대 4개의 작업 실행)
     semaphore = asyncio.Semaphore(4)
@@ -114,7 +115,7 @@ async def generate_tts_and_timeline(file_name: str, model_id: str, text: str):
             start_time += result["start"] + 0.3
 
     # MP3 파일 저장
-    mp3_file = f"tts/{file_name}.mp3"
+    mp3_file = f"{folder}/{file_name}.mp3"
     combined_audio.export(mp3_file, format="mp3")
 
     # 임시 파일 삭제
@@ -134,21 +135,22 @@ def upload_to_s3(file_path: str, bucket: str, object_name: str) -> str:
 async def generate_tts_api(request_data: TTSRequestData):
     """TTS 생성 API"""
     try:
+        folder = request_data.folder.strip()
         file_name = request_data.file_name.strip()
         language = request_data.language.strip()
         text = request_data.text.strip()
 
-        if not file_name or not text or not language:
-            raise HTTPException(status_code=400, detail="file_name, language 또는 text가 제공되지 않았습니다.")
+        if not folder or not file_name or not text or not language:
+            raise HTTPException(status_code=400, detail="folder, file_name, language 또는 text가 제공되지 않았습니다.")
 
         # 언어에 따라 모델 ID 가져오기
         model_id = get_model_id(language)
 
         # TTS 및 타임라인 생성
-        mp3_file, timeline = await generate_tts_and_timeline(file_name, model_id, text)
+        mp3_file, timeline = await generate_tts_and_timeline(folder, file_name, model_id, text)
 
         # S3에 MP3 파일 업로드
-        s3_url = upload_to_s3(mp3_file, AWS_BUCKET, mp3_file)
+        s3_url = upload_to_s3(mp3_file, AWS_BUCKET, f"{folder}/{file_name}.mp3")
 
         # S3 URL 및 타임스탬프 반환
         return {"ttsUrl": s3_url, "timestamps": timeline}
