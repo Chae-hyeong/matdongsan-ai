@@ -8,7 +8,6 @@ from pydub import AudioSegment
 import asyncio
 import os
 import uuid
-import zipfile
 import json
 
 app = FastAPI()
@@ -64,8 +63,8 @@ async def process_line_tts(index: int, line: str, model_id: str) -> dict:
 
     return {"index": index, "start": duration, "temp_file": temp_file}
 
-async def generate_tts_and_timeline(file_name: str, model_id: str, text: str):
-    """TTS 생성 및 타임라인 반환 (비동기, 4개씩 처리)"""
+async def generate_tts(file_name: str, model_id: str, text: str):
+    """TTS 생성 및 타임라인 반환"""
     sentences = split_into_sentences(text)
     combined_audio = AudioSegment.silent(duration=0)
     timeline = []
@@ -94,34 +93,24 @@ async def generate_tts_and_timeline(file_name: str, model_id: str, text: str):
             line_audio = AudioSegment.from_file(result["temp_file"], format=AUDIO_FORMAT)
 
             # 타임스탬프 추가
-            timeline.append({"start": round(start_time, 2)})
+            timeline.append(round(start_time, 2))
             combined_audio += line_audio + AudioSegment.silent(duration=300)
             start_time += result["start"] + 0.3
 
+    # 타임스탬프를 파일 이름에 추가
+    timestamp_str = "_".join(map(str, timeline))
+    mp3_file_name = f"{file_name}_timestamp_{timestamp_str}.mp3"
+
     # MP3 파일 저장
-    mp3_file = f"{file_name}.mp3"
-    combined_audio.export(mp3_file, format="mp3")
-
-    # JSON 파일 저장
-    json_file = f"{file_name}.json"
-    with open(json_file, "w") as f:
-        json.dump(timeline, f, indent=4)
-
-    # ZIP 파일 생성
-    zip_file = f"{file_name}.zip"
-    with zipfile.ZipFile(zip_file, "w") as zipf:
-        zipf.write(mp3_file, os.path.basename(mp3_file))
-        zipf.write(json_file, os.path.basename(json_file))
+    combined_audio.export(mp3_file_name, format="mp3")
 
     # 임시 파일 삭제
-    os.remove(mp3_file)
-    os.remove(json_file)
     for temp_file in temp_files:
         os.remove(temp_file)
 
-    return zip_file
+    return mp3_file_name
 
-@app.post("/generate-tts")
+@app.post("/generate-tts/timestamp")
 async def generate_tts_api(request_data: TTSRequestData):
     """TTS 생성 API"""
     try:
@@ -135,11 +124,11 @@ async def generate_tts_api(request_data: TTSRequestData):
         # 언어에 따라 모델 ID 가져오기
         model_id = get_model_id(language)
 
-        # TTS 및 타임라인 생성
-        zip_file = await generate_tts_and_timeline(file_name, model_id, text)
+        # TTS 생성 및 타임라인 포함된 파일 생성
+        mp3_file = await generate_tts(file_name, model_id, text)
 
-        # ZIP 파일 반환
-        return FileResponse(zip_file, media_type="application/zip", filename=zip_file)
+        # MP3 파일 반환
+        return FileResponse(mp3_file, media_type="audio/mpeg", filename=mp3_file)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
