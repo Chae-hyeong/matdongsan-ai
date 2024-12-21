@@ -1,6 +1,5 @@
 import re
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from fish_audio_sdk import Session, TTSRequest
 from dotenv import load_dotenv
@@ -9,6 +8,7 @@ import asyncio
 import os
 import uuid
 import json
+import boto3
 
 app = FastAPI()
 
@@ -18,6 +18,18 @@ API_KEY = os.getenv("Fish_API_KEY")
 KR_MODEL_ID = os.getenv("KR_MODEL_ID")
 EN_MODEL_ID = os.getenv("EN_MODEL_ID")
 AUDIO_FORMAT = "mp3"
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
+AWS_BUCKET = os.getenv("AWS_BUCKET")
+AWS_REGION = os.getenv("AWS_REGION")
+
+# S3 클라이언트 생성
+s3_client = boto3.client(
+    "s3",
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+    region_name=AWS_REGION,
+)
 
 # 세션 초기화
 session = Session(API_KEY)
@@ -63,12 +75,16 @@ async def process_line_tts(index: int, line: str, model_id: str) -> dict:
 
     return {"index": index, "start": duration, "temp_file": temp_file}
 
-async def generate_tts(file_name: str, model_id: str, text: str):
-    """TTS 생성 및 타임라인 반환"""
+async def generate_tts_and_timeline(file_name: str, model_id: str, text: str):
+    """TTS 생성 및 타임라인 반환 (비동기, 4개씩 처리)"""
     sentences = split_into_sentences(text)
     combined_audio = AudioSegment.silent(duration=0)
     timeline = []
     temp_files = []
+
+    # tts 디렉토리 생성 (없으면 생성)
+    if not os.path.exists("tts"):
+        os.makedirs("tts")
 
     # 동시 작업 제한 설정 (한 번에 최대 4개의 작업 실행)
     semaphore = asyncio.Semaphore(4)
@@ -97,18 +113,22 @@ async def generate_tts(file_name: str, model_id: str, text: str):
             combined_audio += line_audio + AudioSegment.silent(duration=300)
             start_time += result["start"] + 0.3
 
-    # 타임스탬프를 파일 이름에 추가
-    timestamp_str = "_".join(map(str, timeline))
-    mp3_file_name = f"{file_name}_timestamp_{timestamp_str}.mp3"
-
     # MP3 파일 저장
-    combined_audio.export(mp3_file_name, format="mp3")
+    mp3_file = f"tts/{file_name}.mp3"
+    combined_audio.export(mp3_file, format="mp3")
 
     # 임시 파일 삭제
     for temp_file in temp_files:
         os.remove(temp_file)
 
-    return mp3_file_name
+    return mp3_file, timeline
+
+def upload_to_s3(file_path: str, bucket: str, object_name: str) -> str:
+    """S3에 파일 업로드 및 URL 반환"""
+    s3_client.upload_file(file_path, bucket, object_name)
+    os.remove(file_path)  # 로컬 파일 삭제
+    s3_url = f"https://{bucket}.s3.{AWS_REGION}.amazonaws.com/{object_name}"
+    return s3_url
 
 @app.post("/generate-tts")
 async def generate_tts_api(request_data: TTSRequestData):
@@ -124,11 +144,14 @@ async def generate_tts_api(request_data: TTSRequestData):
         # 언어에 따라 모델 ID 가져오기
         model_id = get_model_id(language)
 
-        # TTS 생성 및 타임라인 포함된 파일 생성
-        mp3_file = await generate_tts(file_name, model_id, text)
+        # TTS 및 타임라인 생성
+        mp3_file, timeline = await generate_tts_and_timeline(file_name, model_id, text)
 
-        # MP3 파일 반환
-        return FileResponse(mp3_file, media_type="audio/mpeg", filename=mp3_file)
+        # S3에 MP3 파일 업로드
+        s3_url = upload_to_s3(mp3_file, AWS_BUCKET, mp3_file)
+
+        # S3 URL 및 타임스탬프 반환
+        return {"ttsUrl": s3_url, "timestamps": timeline}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

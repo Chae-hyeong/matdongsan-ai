@@ -6,3 +6,4 @@ pydub
 fish-audio-sdk
 email-validator
 aiofiles
+boto3

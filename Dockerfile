@@ -7,13 +7,17 @@ WORKDIR /app
 # Copy requirements.txt to the working directory
 COPY requirements.txt .
 
-# Install dependencies
+# Install system dependencies for ffmpeg and other tools
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ffmpeg && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies (including boto3)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install ffmpeg for pydub
-RUN apt-get update && apt-get install -y ffmpeg && apt-get clean
-
-# Copy application filess
+# Copy application files
 COPY . .
 
 # Expose port
