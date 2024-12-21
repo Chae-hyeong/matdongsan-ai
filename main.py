@@ -110,7 +110,7 @@ async def generate_tts(file_name: str, model_id: str, text: str):
 
     return mp3_file_name
 
-@app.post("/generate-tts/timestamp")
+@app.post("/generate-tts")
 async def generate_tts_api(request_data: TTSRequestData):
     """TTS 생성 API"""
     try:
