@@ -126,7 +126,15 @@ async def generate_tts_and_timeline(folder: str, file_name: str, model_id: str, 
 
 def upload_to_s3(file_path: str, bucket: str, object_name: str) -> str:
     """S3에 파일 업로드 및 URL 반환"""
-    s3_client.upload_file(file_path, bucket, object_name)
+    s3_client.upload_file(
+        file_path,
+        bucket,
+        object_name,
+        ExtraArgs={
+            "ContentType": "audio/mpeg",  # MP3 파일의 Content-Type 설정
+            "ContentDisposition": "inline"  # 브라우저에서 바로 재생 가능하도록 설정
+        },
+    )
     os.remove(file_path)  # 로컬 파일 삭제
     s3_url = f"https://{bucket}.s3.{AWS_REGION}.amazonaws.com/{object_name}"
     return s3_url
