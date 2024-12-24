@@ -50,7 +50,7 @@ def get_model_id(language: str) -> str:
         raise ValueError("지원되지 않는 언어")
 
 def split_into_sentences(text: str):
-    """큰따옴표 뒤에서 줄바꿈 추가"""
+    """큰따옴표 뒤에서 줄바꿈 추가 및 줄바꿈"""
     sentences = re.sub(r'(?<=[”"]) (?=\w)', '\n', text.strip())
     # 줄바꿈으로 나누고 공백이 아닌 문장만 리스트에 추가
     return [sentence.strip() for sentence in sentences.split('\n') if sentence.strip()]
